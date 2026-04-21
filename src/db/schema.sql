@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Almacena cada lectura enviada por los sensores Arduino
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sensor_data (
-    id           UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id           UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
     device_id    VARCHAR(100) NOT NULL,
     timestamp    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     people_count INTEGER      NOT NULL DEFAULT 0 CHECK (people_count >= 0),
@@ -19,18 +19,17 @@ CREATE TABLE IF NOT EXISTS sensor_data (
     received_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
--- Índices para consultas frecuentes
-CREATE INDEX IF NOT EXISTS idx_sensor_data_device_id  ON sensor_data (device_id);
-CREATE INDEX IF NOT EXISTS idx_sensor_data_zone       ON sensor_data (zone);
-CREATE INDEX IF NOT EXISTS idx_sensor_data_timestamp  ON sensor_data (timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_sensor_data_zone_ts    ON sensor_data (zone, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_sensor_data_device_id ON sensor_data (device_id);
+CREATE INDEX IF NOT EXISTS idx_sensor_data_zone      ON sensor_data (zone);
+CREATE INDEX IF NOT EXISTS idx_sensor_data_timestamp ON sensor_data (timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_sensor_data_zone_ts   ON sensor_data (zone, timestamp DESC);
 
 -- ============================================================
 -- Tabla: energy_actions
 -- Registra cada acción ejecutada sobre sistemas energéticos
 -- ============================================================
 CREATE TABLE IF NOT EXISTS energy_actions (
-    id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id          UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
     zone        VARCHAR(100) NOT NULL,
     action      VARCHAR(20)  NOT NULL CHECK (action IN ('turn_on', 'turn_off', 'adjust')),
     device_type VARCHAR(20)  NOT NULL CHECK (device_type IN ('lighting', 'ventilation', 'climate')),
@@ -47,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_energy_actions_zone_ts ON energy_actions (zone, e
 -- Estado actual de cada sistema energético por zona
 -- ============================================================
 CREATE TABLE IF NOT EXISTS energy_system_status (
-    id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id          UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
     zone        VARCHAR(100) NOT NULL,
     device_type VARCHAR(20)  NOT NULL CHECK (device_type IN ('lighting', 'ventilation', 'climate')),
     status      VARCHAR(10)  NOT NULL DEFAULT 'off' CHECK (status IN ('on', 'off')),
@@ -60,32 +59,33 @@ CREATE INDEX IF NOT EXISTS idx_energy_status_zone ON energy_system_status (zone)
 
 -- ============================================================
 -- Tabla: usuarios
--- Gestión de acceso al sistema
+-- Gestión de acceso al sistema (bcrypt + roles)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS usuarios (
-    id           UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
-    nombre       VARCHAR(100) NOT NULL,
-    email        VARCHAR(150) UNIQUE NOT NULL,
-    password_hash TEXT        NOT NULL,
-    rol          VARCHAR(20)  NOT NULL DEFAULT 'operador' CHECK (rol IN ('admin', 'operador', 'viewer')),
-    activo       BOOLEAN      NOT NULL DEFAULT TRUE,
-    creado_en    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    ultimo_login TIMESTAMPTZ
+    id            UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+    nombre        VARCHAR(100) NOT NULL,
+    email         VARCHAR(150) UNIQUE NOT NULL,
+    password_hash TEXT         NOT NULL,
+    rol           VARCHAR(20)  NOT NULL DEFAULT 'operador'
+                               CHECK (rol IN ('admin', 'operador', 'viewer')),
+    activo        BOOLEAN      NOT NULL DEFAULT TRUE,
+    creado_en     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    ultimo_login  TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios (email);
 
 -- ============================================================
 -- Tabla: refresh_tokens
--- Gestión de tokens de refresco para autenticación persistente
+-- Gestión de sesiones persistentes (token rotation)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS refresh_tokens (
-    id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    usuario_id  UUID        NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-    token_hash  TEXT        NOT NULL UNIQUE,
-    expires_at  TIMESTAMPTZ NOT NULL,
-    creado_en   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    revocado    BOOLEAN     NOT NULL DEFAULT FALSE,
+    id          UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+    usuario_id  UUID         NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    token_hash  TEXT         NOT NULL UNIQUE,
+    expires_at  TIMESTAMPTZ  NOT NULL,
+    creado_en   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    revocado    BOOLEAN      NOT NULL DEFAULT FALSE,
     user_agent  TEXT,
     ip          VARCHAR(45)
 );
@@ -94,11 +94,31 @@ CREATE INDEX IF NOT EXISTS idx_refresh_tokens_usuario ON refresh_tokens (usuario
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash    ON refresh_tokens (token_hash);
 
 -- ============================================================
+-- Tabla: api_keys
+-- Autenticación de dispositivos IoT (Arduino)
+-- Nunca se guarda la key en claro, solo su hash SHA-256
+-- ============================================================
+CREATE TABLE IF NOT EXISTS api_keys (
+    id          UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+    device_id   VARCHAR(100) NOT NULL,
+    key_hash    TEXT         NOT NULL UNIQUE,
+    zone        VARCHAR(100),
+    descripcion TEXT,
+    activa      BOOLEAN      NOT NULL DEFAULT TRUE,
+    creado_en   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    expires_at  TIMESTAMPTZ,
+    ultimo_uso  TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash      ON api_keys (key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_device_id ON api_keys (device_id);
+
+-- ============================================================
 -- Tabla: zones
 -- Catálogo de zonas del espacio de trabajo
 -- ============================================================
 CREATE TABLE IF NOT EXISTS zones (
-    id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id          UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
     name        VARCHAR(100) NOT NULL UNIQUE,
     description TEXT,
     capacity    INTEGER      DEFAULT 0,
@@ -111,7 +131,7 @@ CREATE TABLE IF NOT EXISTS zones (
 -- Catálogo de sensores/dispositivos registrados
 -- ============================================================
 CREATE TABLE IF NOT EXISTS devices (
-    id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id          UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
     device_id   VARCHAR(100) NOT NULL UNIQUE,
     zone        VARCHAR(100),
     description TEXT,
