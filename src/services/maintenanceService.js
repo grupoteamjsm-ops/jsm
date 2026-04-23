@@ -2,34 +2,51 @@ const { query } = require('../config/database');
 
 /**
  * Servicio de mantenimiento periódico
- * - Limpia sensor_data antiguos (retención configurable)
- * - Limpia refresh_tokens expirados o revocados
+ *
+ * POLÍTICA DE DATOS:
+ * - sensor_data y energy_actions NUNCA se borran — se archivan para análisis histórico anual
+ * - Los datos archivados siguen siendo consultables desde sensor_data_archive
+ * - Solo se eliminan refresh_tokens expirados/revocados (no son datos de negocio)
  */
 
-const RETENTION_DAYS = parseInt(process.env.DATA_RETENTION_DAYS) || 90;
+const ARCHIVE_DAYS = parseInt(process.env.DATA_RETENTION_DAYS) || 365;
 
 /**
- * Borrar lecturas de sensores más antiguas que DATA_RETENTION_DAYS
+ * Archivar lecturas de sensores más antiguas que ARCHIVE_DAYS
+ * Los datos se mueven a sensor_data_archive (no se pierden)
  */
-const limpiarSensorData = async () => {
+const archivarSensorData = async () => {
   try {
-    const result = await query(
-      `DELETE FROM sensor_data
-       WHERE timestamp < NOW() - INTERVAL '${RETENTION_DAYS} days'`,
-    );
-    const deleted = result.rowCount || 0;
-    if (deleted > 0) {
-      console.log(`[Maintenance] sensor_data: ${deleted} registros eliminados (>${RETENTION_DAYS} días)`);
+    // Crear tabla de archivo si no existe
+    await query(`
+      CREATE TABLE IF NOT EXISTS sensor_data_archive
+      (LIKE sensor_data INCLUDING ALL)
+    `);
+
+    // Mover registros antiguos al archivo
+    const moved = await query(`
+      WITH moved AS (
+        DELETE FROM sensor_data
+        WHERE timestamp < NOW() - INTERVAL '${ARCHIVE_DAYS} days'
+        RETURNING *
+      )
+      INSERT INTO sensor_data_archive SELECT * FROM moved
+    `);
+
+    const count = moved.rowCount || 0;
+    if (count > 0) {
+      console.log(`[Maintenance] sensor_data: ${count} registros archivados (>${ARCHIVE_DAYS} días)`);
     }
-    return deleted;
+    return count;
   } catch (error) {
-    console.error('[Maintenance] Error limpiando sensor_data:', error.message);
+    console.error('[Maintenance] Error archivando sensor_data:', error.message);
     return 0;
   }
 };
 
 /**
- * Borrar refresh_tokens expirados o revocados hace más de 7 días
+ * Limpiar refresh_tokens expirados o revocados hace más de 7 días
+ * Estos SÍ se borran — no son datos de negocio
  */
 const limpiarRefreshTokens = async () => {
   try {
@@ -50,36 +67,15 @@ const limpiarRefreshTokens = async () => {
 };
 
 /**
- * Borrar energy_actions más antiguas que DATA_RETENTION_DAYS
- */
-const limpiarEnergyActions = async () => {
-  try {
-    const result = await query(
-      `DELETE FROM energy_actions
-       WHERE executed_at < NOW() - INTERVAL '${RETENTION_DAYS} days'`
-    );
-    const deleted = result.rowCount || 0;
-    if (deleted > 0) {
-      console.log(`[Maintenance] energy_actions: ${deleted} registros eliminados (>${RETENTION_DAYS} días)`);
-    }
-    return deleted;
-  } catch (error) {
-    console.error('[Maintenance] Error limpiando energy_actions:', error.message);
-    return 0;
-  }
-};
-
-/**
  * Ejecutar todas las tareas de mantenimiento
  */
 const runMaintenance = async () => {
-  console.log('[Maintenance] Iniciando limpieza periódica...');
-  const [s, t, e] = await Promise.all([
-    limpiarSensorData(),
-    limpiarRefreshTokens(),
-    limpiarEnergyActions()
+  console.log('[Maintenance] Iniciando mantenimiento periódico...');
+  const [archived, tokens] = await Promise.all([
+    archivarSensorData(),
+    limpiarRefreshTokens()
   ]);
-  console.log(`[Maintenance] Completado — sensor_data: ${s}, tokens: ${t}, energy_actions: ${e}`);
+  console.log(`[Maintenance] Completado — archivados: ${archived}, tokens limpiados: ${tokens}`);
 };
 
-module.exports = { runMaintenance, limpiarSensorData, limpiarRefreshTokens, limpiarEnergyActions };
+module.exports = { runMaintenance, archivarSensorData, limpiarRefreshTokens };

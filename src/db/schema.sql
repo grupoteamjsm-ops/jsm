@@ -141,3 +141,11 @@ CREATE TABLE IF NOT EXISTS devices (
 );
 
 CREATE INDEX IF NOT EXISTS idx_devices_device_id ON devices (device_id);
+
+-- ============================================================
+-- Tabla: sensor_data_archive
+-- Datos históricos archivados (>DATA_RETENTION_DAYS)
+-- Los datos NUNCA se borran — se archivan para análisis anual
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sensor_data_archive
+    (LIKE sensor_data INCLUDING ALL);

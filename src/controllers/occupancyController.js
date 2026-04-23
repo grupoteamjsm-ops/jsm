@@ -166,4 +166,75 @@ const getOccupancyByZone = async (c) => {
   }
 };
 
-module.exports = { getCurrentOccupancy, getOccupancyHistory, getOccupancyStats, getOccupancyByHour, getOccupancyByZone };
+/**
+ * GET /api/occupancy/annual
+ * Consulta el historial completo incluyendo datos archivados
+ * Permite análisis anuales y tendencias a largo plazo
+ * Query: ?zone= &year= &from= &to=
+ */
+const getAnnualHistory = async (c) => {
+  try {
+    const zone = c.req.query('zone');
+    const year = c.req.query('year');
+    const from = c.req.query('from');
+    const to   = c.req.query('to');
+
+    const conditions = [];
+    const params     = [];
+    let   idx        = 1;
+
+    if (zone) { conditions.push(`zone = $${idx++}`); params.push(zone); }
+    if (year) {
+      conditions.push(`EXTRACT(YEAR FROM timestamp) = $${idx++}`);
+      params.push(parseInt(year));
+    }
+    if (from) { conditions.push(`timestamp >= $${idx++}`); params.push(new Date(from)); }
+    if (to)   { conditions.push(`timestamp <= $${idx++}`); params.push(new Date(to)); }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Unir tabla activa + archivo para historial completo
+    const result = await query(
+      `SELECT zone,
+              DATE_TRUNC('day', timestamp)              AS dia,
+              ROUND(AVG(people_count)::numeric, 2)      AS media_personas,
+              MAX(people_count)                         AS max_personas,
+              COUNT(*)                                  AS total_lecturas,
+              SUM(CASE WHEN movement THEN 1 ELSE 0 END) AS lecturas_con_movimiento
+       FROM (
+         SELECT zone, timestamp, people_count, movement FROM sensor_data ${where}
+         UNION ALL
+         SELECT zone, timestamp, people_count, movement FROM sensor_data_archive ${where}
+       ) combined
+       GROUP BY zone, dia
+       ORDER BY zone, dia`,
+      params
+    );
+
+    // Años disponibles en el historial
+    const yearsResult = await query(
+      `SELECT DISTINCT EXTRACT(YEAR FROM timestamp)::integer AS year
+       FROM (
+         SELECT timestamp FROM sensor_data
+         UNION ALL
+         SELECT timestamp FROM sensor_data_archive
+       ) all_data
+       ORDER BY year`
+    );
+
+    return c.json({
+      success: true,
+      data: {
+        history:         result.rows,
+        available_years: yearsResult.rows.map(r => r.year),
+        filters:         { zone, year, from, to },
+        timestamp:       new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Error getting annual history:', error.message);
+    return c.json({ error: 'Error interno del servidor' }, 500);
+  }
+};
+
+module.exports = { getCurrentOccupancy, getOccupancyHistory, getOccupancyStats, getOccupancyByHour, getOccupancyByZone, getAnnualHistory };
