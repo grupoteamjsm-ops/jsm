@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
 const { procesarDecision } = require('../services/decisionService');
+const { emitSensorData, emitOccupancy } = require('../services/sseService');
 
 const memoryStore = new Map();
 
@@ -36,9 +37,17 @@ const receiveSensorData = async (c) => {
 
     console.log(`[Sensor] Data received from ${device_id} (zone: ${zone})`);
 
-    procesarDecision(zone, people_count, movement).catch(err =>
-      console.error('[Sensor] Error en decisión automática:', err.message)
-    );
+    // Emitir evento SSE a clientes conectados
+    emitSensorData({ ...data, people_count, movement, zone });
+
+    // Disparar lógica de decisión energética en segundo plano
+    procesarDecision(zone, people_count, movement)
+      .then(acciones => {
+        if (acciones.length > 0) {
+          emitOccupancy({ zone, people_count, movement, acciones, timestamp: new Date().toISOString() });
+        }
+      })
+      .catch(err => console.error('[Sensor] Error en decisión automática:', err.message));
 
     return c.json({ success: true, data }, 201);
   } catch (error) {

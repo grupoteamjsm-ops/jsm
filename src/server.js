@@ -7,6 +7,7 @@ const { secureHeaders } = require('hono/secure-headers');
 const { compress } = require('hono/compress');
 const { connectDB } = require('./config/database');
 const { apagadoAutomatico } = require('./services/decisionService');
+const { runMaintenance } = require('./services/maintenanceService');
 const { authLimiter, sensorLimiter, generalLimiter } = require('./middleware/rateLimiter');
 
 // Rutas
@@ -14,6 +15,10 @@ const authRoutes      = require('./routes/authRoutes');
 const sensorRoutes    = require('./routes/sensorRoutes');
 const occupancyRoutes = require('./routes/occupancyRoutes');
 const energyRoutes    = require('./routes/energyRoutes');
+const zonesRoutes     = require('./routes/zonesRoutes');
+const devicesRoutes   = require('./routes/devicesRoutes');
+const usersRoutes     = require('./routes/usersRoutes');
+const sseRoutes       = require('./routes/sseRoutes');
 
 const app = new Hono();
 
@@ -23,12 +28,12 @@ const corsOrigins = process.env.CORS_ORIGINS === '*'
   : (process.env.CORS_ORIGINS || '*').split(',').map(o => o.trim());
 
 app.use('/*', cors({
-  origin:           corsOrigins,
-  allowMethods:     ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowHeaders:     ['Content-Type', 'Authorization', 'X-API-Key'],
-  exposeHeaders:    ['Authorization', 'X-RateLimit-Limit', 'X-RateLimit-Remaining'],
-  credentials:      corsOrigins !== '*',
-  maxAge:           86400
+  origin:        corsOrigins,
+  allowMethods:  ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowHeaders:  ['Content-Type', 'Authorization', 'X-API-Key'],
+  exposeHeaders: ['Authorization', 'X-RateLimit-Limit', 'X-RateLimit-Remaining'],
+  credentials:   corsOrigins !== '*',
+  maxAge:        86400
 }));
 
 // ─── Middleware global ────────────────────────────────────────
@@ -46,14 +51,19 @@ app.get('/health', (c) => c.json({
   env:       process.env.NODE_ENV || 'development'
 }));
 
-// ─── Rutas API ────────────────────────────────────────────────
-app.use('/api/auth/*',      authLimiter);
+// ─── Rate limits específicos ──────────────────────────────────
+app.use('/api/auth/*',       authLimiter);
 app.use('/api/sensors/data', sensorLimiter);
 
+// ─── Rutas API ────────────────────────────────────────────────
 app.route('/api/auth',      authRoutes);
 app.route('/api/sensors',   sensorRoutes);
 app.route('/api/occupancy', occupancyRoutes);
 app.route('/api/energy',    energyRoutes);
+app.route('/api/zones',     zonesRoutes);
+app.route('/api/devices',   devicesRoutes);
+app.route('/api/users',     usersRoutes);
+app.route('/api/sse',       sseRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────
 app.notFound((c) => c.json({
@@ -64,12 +74,9 @@ app.notFound((c) => c.json({
 app.onError((err, c) => {
   console.error(`[Error] ${c.req.method} ${c.req.path} →`, err.message);
 
-  // Errores PostgreSQL
   if (err.code === '23505') return c.json({ error: 'El recurso ya existe' }, 409);
   if (err.code === '23503') return c.json({ error: 'Referencia inválida' }, 400);
   if (err.code === '22P02') return c.json({ error: 'Formato de datos inválido' }, 400);
-
-  // Errores JWT
   if (err.name === 'JsonWebTokenError') return c.json({ error: 'Token inválido' }, 401);
   if (err.name === 'TokenExpiredError') return c.json({ error: 'Token expirado', code: 'TOKEN_EXPIRED' }, 401);
 
@@ -90,8 +97,15 @@ connectDB().then(() => {
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`API available at http://localhost:${PORT}/api`);
 
-    // Apagado automático: cada minuto revisa zonas sin actividad
+    // ── Jobs periódicos ──────────────────────────────────────
+    // Apagado automático: cada minuto
     setInterval(() => apagadoAutomatico(), 60 * 1000);
+
+    // Mantenimiento: cada 24 horas
+    setInterval(() => runMaintenance(), 24 * 60 * 60 * 1000);
+
+    // Primera ejecución de mantenimiento al arrancar (con delay de 1 min)
+    setTimeout(() => runMaintenance(), 60 * 1000);
   });
 });
 

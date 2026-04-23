@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
+const { emitEnergyAction } = require('../services/sseService');
 
 const memoryStatus = { lighting: {}, ventilation: {}, climate: {} };
 
@@ -32,6 +33,7 @@ const executeEnergyAction = async (c) => {
     }
 
     console.log(`[Energy] ${action} ${device_type} in zone ${zone}`);
+    emitEnergyAction({ zone, action, device_type, value: newValue, timestamp: new Date().toISOString() });
     return c.json({ success: true, data: savedAction });
   } catch (error) {
     console.error('Error executing energy action:', error.message);

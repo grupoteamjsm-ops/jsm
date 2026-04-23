@@ -22,7 +22,8 @@ const saveRefreshToken = async (usuarioId, refreshToken, c) => {
 
   await query(
     `INSERT INTO refresh_tokens (usuario_id, token_hash, expires_at, user_agent, ip)
-     VALUES ($1, $2, $3, $4, $5)`,
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (token_hash) DO NOTHING`,
     [usuarioId, hash, expiresAt, userAgent, ip]
   );
 };
