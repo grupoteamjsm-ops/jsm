@@ -1,20 +1,17 @@
-const express = require('express');
-const router = express.Router();
+const { Hono } = require('hono');
 const energyController = require('../controllers/energyController');
-const { validateEnergyAction, validateQueryParams } = require('../middleware/validator');
 const { authenticateToken } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roles');
+const { validateEnergyAction } = require('../middleware/validator');
 
-// Todas las rutas de energía requieren autenticación
-router.use(authenticateToken);
+const energy = new Hono();
 
-// POST /api/energy/actions — solo admin y operador pueden ejecutar acciones
-router.post('/actions', requireRole('admin', 'operador'), validateEnergyAction, energyController.executeEnergyAction);
+// Todas las rutas requieren JWT
+energy.use('/*', authenticateToken);
 
-// GET /api/energy/status — cualquier usuario autenticado puede ver el estado
-router.get('/status', validateQueryParams, energyController.getEnergyStatus);
+// Acciones solo para admin y operador
+energy.post('/actions',    requireRole('admin', 'operador'), validateEnergyAction, energyController.executeEnergyAction);
+energy.get('/status',      energyController.getEnergyStatus);
+energy.get('/consumption', energyController.getConsumptionData);
 
-// GET /api/energy/consumption — historial de consumo
-router.get('/consumption', validateQueryParams, energyController.getConsumptionData);
-
-module.exports = router;
+module.exports = energy;

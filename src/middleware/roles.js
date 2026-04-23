@@ -1,20 +1,22 @@
 /**
- * Middleware de control de roles
- * Uso: router.get('/ruta', authenticateToken, requireRole('admin'), controller)
+ * Middleware de control de roles para Hono
+ * Uso: app.use('/ruta', authenticateToken, requireRole('admin'))
  */
 const requireRole = (...rolesPermitidos) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ error: 'No autenticado' });
+  return async (c, next) => {
+    const user = c.get('user');
+
+    if (!user) {
+      return c.json({ error: 'No autenticado' }, 401);
     }
 
-    if (!rolesPermitidos.includes(req.user.rol)) {
-      return res.status(403).json({
+    if (!rolesPermitidos.includes(user.rol)) {
+      return c.json({
         error: `Acceso denegado. Se requiere rol: ${rolesPermitidos.join(' o ')}`
-      });
+      }, 403);
     }
 
-    next();
+    await next();
   };
 };
 

@@ -1,20 +1,16 @@
-const express = require('express');
-const router = express.Router();
+const { Hono } = require('hono');
 const authController = require('../controllers/authController');
 const { authenticateToken } = require('../middleware/auth');
 const { validateAuth, validateChangePassword } = require('../middleware/validator');
 
-// Registro e inicio de sesión
-router.post('/register', validateAuth, authController.register);
-router.post('/login',    validateAuth, authController.login);
+const auth = new Hono();
 
-// Gestión de tokens
-router.post('/refresh',     authController.refresh);
-router.post('/logout',      authController.logout);
-router.post('/logout-all',  authenticateToken, authController.logoutAll);
+auth.post('/register',    validateAuth,           authController.register);
+auth.post('/login',       validateAuth,           authController.login);
+auth.post('/refresh',                             authController.refresh);
+auth.post('/logout',                              authController.logout);
+auth.post('/logout-all',  authenticateToken,      authController.logoutAll);
+auth.get('/me',           authenticateToken,      authController.me);
+auth.put('/password',     authenticateToken, validateChangePassword, authController.changePassword);
 
-// Perfil y contraseña (requieren access token)
-router.get('/me',       authenticateToken, authController.me);
-router.put('/password', authenticateToken, validateChangePassword, authController.changePassword);
-
-module.exports = router;
+module.exports = auth;

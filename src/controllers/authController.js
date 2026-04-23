@@ -12,14 +12,13 @@ const SALT_ROUNDS = 12;
 
 // ─── Helpers ─────────────────────────────────────────────────
 
-/**
- * Guarda el refresh token (hasheado) en la BD
- */
-const saveRefreshToken = async (usuarioId, refreshToken, req) => {
+const saveRefreshToken = async (usuarioId, refreshToken, c) => {
   const hash      = hashToken(refreshToken);
   const expiresAt = refreshExpiresAt();
-  const userAgent = req.headers['user-agent'] || null;
-  const ip        = req.ip || req.connection?.remoteAddress || null;
+  const userAgent = c.req.header('user-agent') || null;
+  const ip        = c.req.header('x-forwarded-for')?.split(',')[0].trim()
+                 || c.req.header('x-real-ip')
+                 || null;
 
   await query(
     `INSERT INTO refresh_tokens (usuario_id, token_hash, expires_at, user_agent, ip)
@@ -28,15 +27,12 @@ const saveRefreshToken = async (usuarioId, refreshToken, req) => {
   );
 };
 
-/**
- * Construye la respuesta estándar de autenticación
- */
 const buildAuthResponse = (usuario, accessToken, refreshToken) => ({
-  success: true,
+  success:       true,
   access_token:  accessToken,
   refresh_token: refreshToken,
   token_type:    'Bearer',
-  expires_in:    parseInt(process.env.JWT_EXPIRES_IN) || 900, // segundos
+  expires_in:    900,
   usuario: {
     id:     usuario.id,
     nombre: usuario.nombre,
@@ -47,21 +43,13 @@ const buildAuthResponse = (usuario, accessToken, refreshToken) => ({
 
 // ─── Controladores ───────────────────────────────────────────
 
-/**
- * POST /api/auth/register
- * Body: { nombre, email, password, rol? }
- */
-const register = async (req, res) => {
+const register = async (c) => {
   try {
-    const { nombre, email, password, rol = 'operador' } = req.body;
+    const { nombre, email, password, rol = 'operador' } = c.req.valid('json');
 
-    // Email duplicado
-    const existing = await query(
-      'SELECT id FROM usuarios WHERE email = $1',
-      [email]
-    );
+    const existing = await query('SELECT id FROM usuarios WHERE email = $1', [email]);
     if (existing.rows.length > 0) {
-      return res.status(409).json({ error: 'El email ya está registrado' });
+      return c.json({ error: 'El email ya está registrado' }, 409);
     }
 
     const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
@@ -78,22 +66,18 @@ const register = async (req, res) => {
     const accessToken  = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
 
-    await saveRefreshToken(usuario.id, refreshToken, req);
+    await saveRefreshToken(usuario.id, refreshToken, c);
 
-    res.status(201).json(buildAuthResponse(usuario, accessToken, refreshToken));
+    return c.json(buildAuthResponse(usuario, accessToken, refreshToken), 201);
   } catch (error) {
     console.error('Error en register:', error.message);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return c.json({ error: 'Error interno del servidor' }, 500);
   }
 };
 
-/**
- * POST /api/auth/login
- * Body: { email, password }
- */
-const login = async (req, res) => {
+const login = async (c) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = c.req.valid('json');
 
     const result = await query(
       'SELECT * FROM usuarios WHERE email = $1 AND activo = TRUE',
@@ -101,209 +85,161 @@ const login = async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Credenciales incorrectas' });
+      return c.json({ error: 'Credenciales incorrectas' }, 401);
     }
 
     const usuario = result.rows[0];
-
     const passwordValida = await bcrypt.compare(password, usuario.password_hash);
+
     if (!passwordValida) {
-      return res.status(401).json({ error: 'Credenciales incorrectas' });
+      return c.json({ error: 'Credenciales incorrectas' }, 401);
     }
 
-    // Actualizar último login
-    await query(
-      'UPDATE usuarios SET ultimo_login = NOW() WHERE id = $1',
-      [usuario.id]
-    );
+    await query('UPDATE usuarios SET ultimo_login = NOW() WHERE id = $1', [usuario.id]);
 
     const payload      = { id: usuario.id, email: usuario.email, rol: usuario.rol };
     const accessToken  = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
 
-    await saveRefreshToken(usuario.id, refreshToken, req);
+    await saveRefreshToken(usuario.id, refreshToken, c);
 
-    res.json(buildAuthResponse(usuario, accessToken, refreshToken));
+    return c.json(buildAuthResponse(usuario, accessToken, refreshToken));
   } catch (error) {
     console.error('Error en login:', error.message);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return c.json({ error: 'Error interno del servidor' }, 500);
   }
 };
 
-/**
- * POST /api/auth/refresh
- * Body: { refresh_token }
- * Devuelve un nuevo access token sin necesidad de volver a hacer login
- */
-const refresh = async (req, res) => {
+const refresh = async (c) => {
   try {
-    const { refresh_token } = req.body;
+    const body = await c.req.json();
+    const { refresh_token } = body;
 
     if (!refresh_token) {
-      return res.status(400).json({ error: 'refresh_token requerido' });
+      return c.json({ error: 'refresh_token requerido' }, 400);
     }
 
-    // Verificar firma JWT del refresh token
     let payload;
     try {
       payload = verifyRefreshToken(refresh_token);
     } catch (err) {
-      return res.status(401).json({
+      return c.json({
         error: err.name === 'TokenExpiredError'
           ? 'Refresh token expirado, inicia sesión de nuevo'
           : 'Refresh token inválido'
-      });
+      }, 401);
     }
 
-    // Comprobar que existe en BD y no está revocado
     const hash   = hashToken(refresh_token);
     const result = await query(
       `SELECT * FROM refresh_tokens
-       WHERE token_hash = $1
-         AND revocado   = FALSE
-         AND expires_at > NOW()`,
+       WHERE token_hash = $1 AND revocado = FALSE AND expires_at > NOW()`,
       [hash]
     );
 
     if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Refresh token inválido o revocado' });
+      return c.json({ error: 'Refresh token inválido o revocado' }, 401);
     }
 
-    // Revocar el token usado (rotación de tokens)
-    await query(
-      'UPDATE refresh_tokens SET revocado = TRUE WHERE token_hash = $1',
-      [hash]
-    );
+    await query('UPDATE refresh_tokens SET revocado = TRUE WHERE token_hash = $1', [hash]);
 
-    // Obtener datos actualizados del usuario
     const userResult = await query(
       'SELECT id, nombre, email, rol FROM usuarios WHERE id = $1 AND activo = TRUE',
       [payload.id]
     );
 
     if (userResult.rows.length === 0) {
-      return res.status(401).json({ error: 'Usuario no encontrado o inactivo' });
+      return c.json({ error: 'Usuario no encontrado o inactivo' }, 401);
     }
 
-    const usuario       = userResult.rows[0];
-    const newPayload    = { id: usuario.id, email: usuario.email, rol: usuario.rol };
-    const accessToken   = generateAccessToken(newPayload);
-    const newRefresh    = generateRefreshToken(newPayload);
+    const usuario      = userResult.rows[0];
+    const newPayload   = { id: usuario.id, email: usuario.email, rol: usuario.rol };
+    const accessToken  = generateAccessToken(newPayload);
+    const newRefresh   = generateRefreshToken(newPayload);
 
-    await saveRefreshToken(usuario.id, newRefresh, req);
+    await saveRefreshToken(usuario.id, newRefresh, c);
 
-    res.json(buildAuthResponse(usuario, accessToken, newRefresh));
+    return c.json(buildAuthResponse(usuario, accessToken, newRefresh));
   } catch (error) {
     console.error('Error en refresh:', error.message);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return c.json({ error: 'Error interno del servidor' }, 500);
   }
 };
 
-/**
- * POST /api/auth/logout
- * Revoca el refresh token actual
- * Body: { refresh_token }
- */
-const logout = async (req, res) => {
+const logout = async (c) => {
   try {
-    const { refresh_token } = req.body;
+    const body = await c.req.json().catch(() => ({}));
+    const { refresh_token } = body;
 
     if (refresh_token) {
       const hash = hashToken(refresh_token);
-      await query(
-        'UPDATE refresh_tokens SET revocado = TRUE WHERE token_hash = $1',
-        [hash]
-      );
+      await query('UPDATE refresh_tokens SET revocado = TRUE WHERE token_hash = $1', [hash]);
     }
 
-    res.json({ success: true, message: 'Sesión cerrada correctamente' });
+    return c.json({ success: true, message: 'Sesión cerrada correctamente' });
   } catch (error) {
     console.error('Error en logout:', error.message);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return c.json({ error: 'Error interno del servidor' }, 500);
   }
 };
 
-/**
- * POST /api/auth/logout-all
- * Revoca TODOS los refresh tokens del usuario (cerrar todas las sesiones)
- * Requiere access token válido
- */
-const logoutAll = async (req, res) => {
+const logoutAll = async (c) => {
   try {
-    await query(
-      'UPDATE refresh_tokens SET revocado = TRUE WHERE usuario_id = $1',
-      [req.user.id]
-    );
-
-    res.json({ success: true, message: 'Todas las sesiones cerradas' });
+    const user = c.get('user');
+    await query('UPDATE refresh_tokens SET revocado = TRUE WHERE usuario_id = $1', [user.id]);
+    return c.json({ success: true, message: 'Todas las sesiones cerradas' });
   } catch (error) {
     console.error('Error en logoutAll:', error.message);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return c.json({ error: 'Error interno del servidor' }, 500);
   }
 };
 
-/**
- * GET /api/auth/me
- * Perfil del usuario autenticado
- */
-const me = async (req, res) => {
+const me = async (c) => {
   try {
+    const user   = c.get('user');
     const result = await query(
       'SELECT id, nombre, email, rol, activo, creado_en, ultimo_login FROM usuarios WHERE id = $1',
-      [req.user.id]
+      [user.id]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
+      return c.json({ error: 'Usuario no encontrado' }, 404);
     }
 
-    res.json({ success: true, usuario: result.rows[0] });
+    return c.json({ success: true, usuario: result.rows[0] });
   } catch (error) {
     console.error('Error en me:', error.message);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return c.json({ error: 'Error interno del servidor' }, 500);
   }
 };
 
-/**
- * PUT /api/auth/password
- * Cambiar contraseña — requiere access token
- * Body: { password_actual, password_nueva }
- */
-const changePassword = async (req, res) => {
+const changePassword = async (c) => {
   try {
-    const { password_actual, password_nueva } = req.body;
+    const user = c.get('user');
+    const { password_actual, password_nueva } = c.req.valid('json');
 
     const result = await query(
       'SELECT password_hash FROM usuarios WHERE id = $1',
-      [req.user.id]
+      [user.id]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
+      return c.json({ error: 'Usuario no encontrado' }, 404);
     }
 
     const valida = await bcrypt.compare(password_actual, result.rows[0].password_hash);
     if (!valida) {
-      return res.status(401).json({ error: 'La contraseña actual es incorrecta' });
+      return c.json({ error: 'La contraseña actual es incorrecta' }, 401);
     }
 
     const nuevo_hash = await bcrypt.hash(password_nueva, SALT_ROUNDS);
+    await query('UPDATE usuarios SET password_hash = $1 WHERE id = $2', [nuevo_hash, user.id]);
+    await query('UPDATE refresh_tokens SET revocado = TRUE WHERE usuario_id = $1', [user.id]);
 
-    await query(
-      'UPDATE usuarios SET password_hash = $1 WHERE id = $2',
-      [nuevo_hash, req.user.id]
-    );
-
-    // Revocar todos los refresh tokens al cambiar contraseña
-    await query(
-      'UPDATE refresh_tokens SET revocado = TRUE WHERE usuario_id = $1',
-      [req.user.id]
-    );
-
-    res.json({ success: true, message: 'Contraseña actualizada. Inicia sesión de nuevo.' });
+    return c.json({ success: true, message: 'Contraseña actualizada. Inicia sesión de nuevo.' });
   } catch (error) {
     console.error('Error en changePassword:', error.message);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return c.json({ error: 'Error interno del servidor' }, 500);
   }
 };
 

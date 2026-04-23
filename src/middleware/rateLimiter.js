@@ -1,52 +1,57 @@
-const rateLimit = require('express-rate-limit');
-
 /**
- * Respuesta estándar cuando se supera el límite
- * Sin exponer información interna del sistema
+ * Rate limiting para Hono — implementado con Map en memoria
+ * Para producción con múltiples instancias, usar Redis
  */
-const rateLimitHandler = (req, res) => {
-  res.status(429).json({
-    error: 'Demasiadas peticiones. Inténtalo más tarde.',
-    retry_after: Math.ceil(req.rateLimit.resetTime / 1000)
-  });
+
+const createRateLimiter = ({ windowMs, max, message }) => {
+  const store = new Map(); // ip → { count, resetAt }
+
+  return async (c, next) => {
+    const ip  = c.req.header('x-forwarded-for')?.split(',')[0].trim()
+             || c.req.header('x-real-ip')
+             || 'unknown';
+
+    const now = Date.now();
+    const entry = store.get(ip);
+
+    if (!entry || now > entry.resetAt) {
+      store.set(ip, { count: 1, resetAt: now + windowMs });
+      return await next();
+    }
+
+    if (entry.count >= max) {
+      const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+      c.header('Retry-After', String(retryAfter));
+      c.header('X-RateLimit-Limit', String(max));
+      c.header('X-RateLimit-Remaining', '0');
+      return c.json({ error: message || 'Demasiadas peticiones. Inténtalo más tarde.' }, 429);
+    }
+
+    entry.count++;
+    c.header('X-RateLimit-Limit', String(max));
+    c.header('X-RateLimit-Remaining', String(max - entry.count));
+    return await next();
+  };
 };
 
-/**
- * Límite general — todas las rutas
- * 200 peticiones por IP cada 15 minutos
- */
-const generalLimiter = rateLimit({
-  windowMs:         15 * 60 * 1000,
-  max:              200,
-  standardHeaders:  true,
-  legacyHeaders:    false,
-  handler:          rateLimitHandler
+// Límite estricto para auth (anti brute force): 10 intentos / 15 min
+const authLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max:      10,
+  message:  'Demasiados intentos de autenticación. Inténtalo en 15 minutos.'
 });
 
-/**
- * Límite estricto para autenticación
- * Protege contra brute force en login/register
- * 10 intentos por IP cada 15 minutos
- */
-const authLimiter = rateLimit({
-  windowMs:         15 * 60 * 1000,
-  max:              10,
-  standardHeaders:  true,
-  legacyHeaders:    false,
-  handler:          rateLimitHandler,
-  skipSuccessfulRequests: true  // solo cuenta los intentos fallidos
+// Límite alto para sensores Arduino: 1000 req / min
+const sensorLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max:      1000,
+  message:  'Límite de lecturas de sensor superado.'
 });
 
-/**
- * Límite para ingesta de sensores
- * 1000 lecturas por IP cada minuto (permite alta frecuencia de Arduino)
- */
-const sensorLimiter = rateLimit({
-  windowMs:        60 * 1000,
-  max:             1000,
-  standardHeaders: true,
-  legacyHeaders:   false,
-  handler:         rateLimitHandler
+// Límite general: 200 req / 15 min
+const generalLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max:      200
 });
 
-module.exports = { generalLimiter, authLimiter, sensorLimiter };
+module.exports = { authLimiter, sensorLimiter, generalLimiter };

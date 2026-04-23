@@ -1,94 +1,98 @@
 require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const compression = require('compression');
+const { serve } = require('@hono/node-server');
+const { Hono } = require('hono');
+const { logger } = require('hono/logger');
+const { cors } = require('hono/cors');
+const { secureHeaders } = require('hono/secure-headers');
+const { compress } = require('hono/compress');
 const { connectDB } = require('./config/database');
 const { apagadoAutomatico } = require('./services/decisionService');
-const { generalLimiter, authLimiter, sensorLimiter } = require('./middleware/rateLimiter');
-const { errorHandler, notFound } = require('./middleware/errorHandler');
+const { authLimiter, sensorLimiter, generalLimiter } = require('./middleware/rateLimiter');
 
-const app = express();
-
-// Conectar a PostgreSQL
-connectDB();
-
-// ─── CORS ────────────────────────────────────────────────────
-// Permite peticiones desde web, tablet y móvil (React Native, PWA, etc.)
-const corsOrigins = process.env.CORS_ORIGINS === '*'
-  ? '*'
-  : (process.env.CORS_ORIGINS || '*').split(',').map(o => o.trim());
-
-app.use(cors({
-  origin:           corsOrigins,
-  methods:          ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders:   ['Content-Type', 'Authorization', 'X-API-Key'],
-  exposedHeaders:   ['Authorization', 'RateLimit-Limit', 'RateLimit-Remaining'],
-  credentials:      corsOrigins !== '*',
-  maxAge:           86400
-}));
-
-// ─── Seguridad HTTP ───────────────────────────────────────────
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: 'cross-origin' },
-  // En producción activar HSTS (fuerza HTTPS)
-  hsts: process.env.NODE_ENV === 'production'
-    ? { maxAge: 31536000, includeSubDomains: true }
-    : false
-}));
-
-// ─── Rate limiting general ────────────────────────────────────
-app.use(generalLimiter);
-
-// ─── Utilidades ───────────────────────────────────────────────
-app.use(compression());
-app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
-app.use(express.json({ limit: '10kb' }));       // limitar tamaño del body
-app.use(express.urlencoded({ extended: true, limit: '10kb' }));
-
-// ─── Rutas ────────────────────────────────────────────────────
+// Rutas
 const authRoutes      = require('./routes/authRoutes');
 const sensorRoutes    = require('./routes/sensorRoutes');
 const occupancyRoutes = require('./routes/occupancyRoutes');
 const energyRoutes    = require('./routes/energyRoutes');
 
-// Auth con rate limit estricto (anti brute force)
-app.use('/api/auth',      authLimiter, authRoutes);
+const app = new Hono();
 
-// Sensores con rate limit alto (Arduino envía frecuentemente)
-app.use('/api/sensors',   sensorLimiter, sensorRoutes);
+// ─── CORS ─────────────────────────────────────────────────────
+const corsOrigins = process.env.CORS_ORIGINS === '*'
+  ? '*'
+  : (process.env.CORS_ORIGINS || '*').split(',').map(o => o.trim());
 
-// Ocupación y energía con rate limit general
-app.use('/api/occupancy', occupancyRoutes);
-app.use('/api/energy',    energyRoutes);
+app.use('/*', cors({
+  origin:           corsOrigins,
+  allowMethods:     ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowHeaders:     ['Content-Type', 'Authorization', 'X-API-Key'],
+  exposeHeaders:    ['Authorization', 'X-RateLimit-Limit', 'X-RateLimit-Remaining'],
+  credentials:      corsOrigins !== '*',
+  maxAge:           86400
+}));
+
+// ─── Middleware global ────────────────────────────────────────
+app.use('/*', secureHeaders());
+app.use('/*', compress());
+app.use('/*', logger());
+app.use('/*', generalLimiter);
 
 // ─── Health check ─────────────────────────────────────────────
-app.get('/health', (_req, res) => {
-  res.json({
-    status:    'ok',
-    message:   'IoT Occupancy Backend is running',
-    timestamp: new Date().toISOString(),
-    env:       process.env.NODE_ENV || 'development'
-  });
+app.get('/health', (c) => c.json({
+  status:    'ok',
+  message:   'IoT Occupancy Backend is running',
+  framework: 'Hono',
+  timestamp: new Date().toISOString(),
+  env:       process.env.NODE_ENV || 'development'
+}));
+
+// ─── Rutas API ────────────────────────────────────────────────
+app.use('/api/auth/*',      authLimiter);
+app.use('/api/sensors/data', sensorLimiter);
+
+app.route('/api/auth',      authRoutes);
+app.route('/api/sensors',   sensorRoutes);
+app.route('/api/occupancy', occupancyRoutes);
+app.route('/api/energy',    energyRoutes);
+
+// ─── 404 ──────────────────────────────────────────────────────
+app.notFound((c) => c.json({
+  error: `Ruta no encontrada: ${c.req.method} ${c.req.path}`
+}, 404));
+
+// ─── Error global ─────────────────────────────────────────────
+app.onError((err, c) => {
+  console.error(`[Error] ${c.req.method} ${c.req.path} →`, err.message);
+
+  // Errores PostgreSQL
+  if (err.code === '23505') return c.json({ error: 'El recurso ya existe' }, 409);
+  if (err.code === '23503') return c.json({ error: 'Referencia inválida' }, 400);
+  if (err.code === '22P02') return c.json({ error: 'Formato de datos inválido' }, 400);
+
+  // Errores JWT
+  if (err.name === 'JsonWebTokenError') return c.json({ error: 'Token inválido' }, 401);
+  if (err.name === 'TokenExpiredError') return c.json({ error: 'Token expirado', code: 'TOKEN_EXPIRED' }, 401);
+
+  const message = process.env.NODE_ENV === 'production'
+    ? 'Error interno del servidor'
+    : err.message;
+
+  return c.json({ error: message }, err.status || 500);
 });
 
-// ─── 404 y errores globales ───────────────────────────────────
-app.use(notFound);
-app.use(errorHandler);
-
 // ─── Arranque ─────────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT) || 3000;
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`API available at http://localhost:${PORT}/api`);
+connectDB().then(() => {
+  serve({ fetch: app.fetch, port: PORT }, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Framework: Hono`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`API available at http://localhost:${PORT}/api`);
 
-  // Apagado automático: cada minuto revisa zonas sin actividad
-  setInterval(() => {
-    apagadoAutomatico();
-  }, 60 * 1000);
+    // Apagado automático: cada minuto revisa zonas sin actividad
+    setInterval(() => apagadoAutomatico(), 60 * 1000);
+  });
 });
 
 module.exports = app;

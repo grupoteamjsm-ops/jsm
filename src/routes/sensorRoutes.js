@@ -1,17 +1,16 @@
-const express = require('express');
-const router = express.Router();
+const { Hono } = require('hono');
 const sensorController = require('../controllers/sensorController');
-const { validateSensorData, validateQueryParams } = require('../middleware/validator');
 const { authenticateToken } = require('../middleware/auth');
 const { authenticateApiKey } = require('../middleware/apiKey');
+const { validateSensorData } = require('../middleware/validator');
 
-// POST /api/sensors/data — Arduino envía datos con API Key
-router.post('/data', authenticateApiKey, validateSensorData, sensorController.receiveSensorData);
+const sensors = new Hono();
 
-// GET /api/sensors — requiere JWT
-router.get('/', authenticateToken, validateQueryParams, sensorController.listSensors);
+// Arduino envía datos con API Key
+sensors.post('/data',       authenticateApiKey, validateSensorData, sensorController.receiveSensorData);
 
-// GET /api/sensors/:deviceId — requiere JWT
-router.get('/:deviceId', authenticateToken, sensorController.getSensorStatus);
+// Consultas requieren JWT
+sensors.get('/',            authenticateToken, sensorController.listSensors);
+sensors.get('/:deviceId',   authenticateToken, sensorController.getSensorStatus);
 
-module.exports = router;
+module.exports = sensors;

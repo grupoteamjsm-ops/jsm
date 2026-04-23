@@ -3,29 +3,21 @@ const crypto = require('crypto');
 
 /**
  * Middleware de autenticación por API Key para dispositivos IoT (Arduino)
- *
- * El Arduino debe enviar la cabecera:
- *   X-API-Key: <api_key>
- *
- * Si no hay API keys configuradas en BD, se permite el acceso
- * (modo desarrollo). En producción siempre debe haber al menos una key.
+ * Cabecera requerida: X-API-Key: <key>
  */
-const authenticateApiKey = async (req, res, next) => {
-  // En desarrollo sin BD, permitir paso libre
-  if (process.env.NODE_ENV !== 'production' && !process.env.REQUIRE_API_KEY) {
-    return next();
+const authenticateApiKey = async (c, next) => {
+  // En desarrollo sin REQUIRE_API_KEY=true, permitir paso libre
+  if (process.env.REQUIRE_API_KEY !== 'true') {
+    return await next();
   }
 
-  const apiKey = req.headers['x-api-key'];
+  const apiKey = c.req.header('x-api-key');
 
   if (!apiKey) {
-    return res.status(401).json({
-      error: 'API Key requerida. Incluye la cabecera X-API-Key.'
-    });
+    return c.json({ error: 'API Key requerida. Incluye la cabecera X-API-Key.' }, 401);
   }
 
   try {
-    // Hashear la key recibida para comparar con la BD
     const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
 
     const result = await query(
@@ -35,24 +27,20 @@ const authenticateApiKey = async (req, res, next) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'API Key inválida o expirada' });
+      return c.json({ error: 'API Key inválida o expirada' }, 401);
     }
 
-    // Adjuntar info del dispositivo al request
-    req.device = result.rows[0];
+    c.set('device', result.rows[0]);
 
-    // Actualizar último uso
-    await query(
-      'UPDATE api_keys SET ultimo_uso = NOW() WHERE key_hash = $1',
-      [keyHash]
-    ).catch(() => {}); // no bloquear si falla
+    // Actualizar último uso en segundo plano
+    query('UPDATE api_keys SET ultimo_uso = NOW() WHERE key_hash = $1', [keyHash])
+      .catch(() => {});
 
-    next();
+    await next();
   } catch (error) {
-    // Si la tabla no existe aún, permitir paso (modo desarrollo)
-    if (error.code === '42P01') return next();
+    if (error.code === '42P01') return await next(); // tabla no existe aún (dev)
     console.error('[ApiKey] Error:', error.message);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return c.json({ error: 'Error interno del servidor' }, 500);
   }
 };
 
