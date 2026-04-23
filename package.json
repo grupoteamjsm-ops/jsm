@@ -9,7 +9,12 @@
     "migrate": "node src/db/migrate.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["iot", "occupancy", "smart-environments", "energy-optimization"],
+  "keywords": [
+    "iot",
+    "occupancy",
+    "smart-environments",
+    "energy-optimization"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -20,6 +25,8 @@
     "hono": "^4.4.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.5",
+    "pino": "^9.2.0",
+    "pino-pretty": "^11.0.0",
     "uuid": "^14.0.0",
     "zod": "^3.23.8"
   },

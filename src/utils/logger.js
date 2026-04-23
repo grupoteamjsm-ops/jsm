@@ -1,38 +1,46 @@
+const pino = require('pino');
+
+const isProd = process.env.NODE_ENV === 'production';
+
 /**
- * Servicio de logging centralizado
+ * Logger estructurado con Pino
+ *
+ * Desarrollo: salida legible con pino-pretty (colores, formato humano)
+ * Producción: salida JSON (para enviar a servicios de logs: Datadog, Loki, CloudWatch...)
  */
-const logger = {
-  log: (message, level = 'INFO') => {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [${level}] ${message}`);
+const logger = pino({
+  level: process.env.LOG_LEVEL || (isProd ? 'info' : 'debug'),
+
+  // En producción: JSON puro para ingestión por servicios de logs
+  // En desarrollo: formato legible
+  transport: isProd
+    ? undefined
+    : {
+        target: 'pino-pretty',
+        options: {
+          colorize:        true,
+          translateTime:   'SYS:HH:MM:ss',
+          ignore:          'pid,hostname',
+          messageFormat:   '{msg}',
+          levelFirst:      true
+        }
+      },
+
+  // Campos base en todos los logs
+  base: {
+    service: 'iot-occupancy-backend',
+    env:     process.env.NODE_ENV || 'development'
   },
 
-  info: (message) => {
-    logger.log(message, 'INFO');
-  },
-
-  warn: (message) => {
-    logger.log(message, 'WARN');
-  },
-
-  error: (message, error = null) => {
-    logger.log(message, 'ERROR');
-    if (error) {
-      console.error(error);
-    }
-  },
-
-  sensorData: (data) => {
-    logger.info(`Sensor data received: ${JSON.stringify(data)}`);
-  },
-
-  energyAction: (action) => {
-    logger.info(`Energy action executed: ${JSON.stringify(action)}`);
-  },
-
-  decision: (decision) => {
-    logger.info(`Decision made: ${JSON.stringify(decision)}`);
+  // Serializar errores correctamente
+  serializers: {
+    err: pino.stdSerializers.err,
+    req: (req) => ({
+      method: req.method,
+      url:    req.url,
+      ip:     req.headers?.['x-forwarded-for'] || req.remoteAddress
+    })
   }
-};
+});
 
 module.exports = logger;
