@@ -1,0 +1,205 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Google Fonts ─────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;900&family=Rajdhani:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+/* ─── Base ──────────────────────────────────────────────────── */
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    @apply bg-fl-dark text-fl-mint font-inter antialiased;
+    background-image:
+      radial-gradient(ellipse at 20% 50%, rgba(45,106,79,0.08) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 20%, rgba(29,53,87,0.08) 0%, transparent 60%);
+    min-height: 100vh;
+  }
+
+  h1, h2, h3 { @apply font-orbitron; }
+  h4, h5, h6 { @apply font-rajdhani font-semibold; }
+}
+
+/* ─── Componentes reutilizables ─────────────────────────────── */
+@layer components {
+
+  /* ── Botón Primario ──────────────────────────────────────── */
+  .btn-primary {
+    @apply relative inline-flex items-center justify-center gap-2
+           px-6 py-3 font-orbitron font-semibold text-sm uppercase tracking-widest
+           text-fl-mint bg-gradient-primary
+           transition-all duration-200 ease-out
+           focus:outline-none focus:ring-2 focus:ring-fl-green-l focus:ring-offset-2 focus:ring-offset-fl-dark;
+
+    /* Esquinas cortadas estilo futurista */
+    clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+    box-shadow: 0 0 12px rgba(45,106,79,0.5);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    @apply shadow-glow-green-lg;
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:active:not(:disabled) {
+    transform: scale(0.98) translateY(0);
+    @apply shadow-glow-green;
+  }
+
+  .btn-primary:disabled {
+    background: rgba(8,28,21,0.5);
+    @apply text-fl-mint/40 cursor-not-allowed shadow-none;
+    clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+  }
+
+  /* ── Botón Secundario (Outline) ──────────────────────────── */
+  .btn-secondary {
+    @apply relative inline-flex items-center justify-center gap-2
+           px-6 py-3 font-rajdhani font-semibold text-sm uppercase tracking-wider
+           text-fl-green-l bg-transparent
+           border-2 border-fl-blue
+           transition-all duration-200 ease-out
+           focus:outline-none focus:ring-2 focus:ring-fl-blue focus:ring-offset-2 focus:ring-offset-fl-dark;
+
+    clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    @apply border-fl-green text-fl-mint bg-fl-green/10;
+    box-shadow: 0 0 12px rgba(29,53,87,0.5);
+  }
+
+  .btn-secondary:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  .btn-secondary:disabled {
+    @apply opacity-40 cursor-not-allowed;
+  }
+
+  /* ── Botón Peligro ───────────────────────────────────────── */
+  .btn-danger {
+    @apply relative inline-flex items-center justify-center gap-2
+           px-6 py-3 font-rajdhani font-semibold text-sm uppercase tracking-wider
+           text-fl-mint bg-fl-danger/80
+           border border-fl-danger
+           transition-all duration-200 ease-out;
+    clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+  }
+
+  .btn-danger:hover:not(:disabled) {
+    @apply bg-fl-danger;
+    box-shadow: 0 0 12px rgba(230,57,70,0.5);
+  }
+
+  .btn-danger:active:not(:disabled) { transform: scale(0.98); }
+  .btn-danger:disabled { @apply opacity-40 cursor-not-allowed; }
+
+  /* ── Botón Icon (solo icono) ─────────────────────────────── */
+  .btn-icon {
+    @apply inline-flex items-center justify-center w-9 h-9
+           text-fl-green-l bg-fl-green/10 border border-fl-green/30
+           rounded transition-all duration-200;
+  }
+  .btn-icon:hover { @apply bg-fl-green/20 border-fl-green text-fl-mint shadow-glow-green; }
+
+  /* ── Card ────────────────────────────────────────────────── */
+  .card {
+    @apply relative bg-fl-darker/80 border border-fl-green/20
+           backdrop-blur-sm shadow-card overflow-hidden;
+    clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+  }
+
+  .card::before {
+    content: '';
+    @apply absolute inset-0 bg-gradient-card pointer-events-none;
+  }
+
+  /* ── Input ───────────────────────────────────────────────── */
+  .input {
+    @apply w-full px-4 py-3 font-inter text-sm text-fl-mint
+           bg-fl-dark/80 border border-fl-blue/50
+           placeholder-fl-mint/30
+           transition-all duration-200
+           focus:outline-none focus:border-fl-green focus:ring-1 focus:ring-fl-green/50;
+    clip-path: polygon(6px 0%, 100% 0%, calc(100% - 6px) 100%, 0% 100%);
+  }
+
+  /* ── Badge ───────────────────────────────────────────────── */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 text-xs font-rajdhani font-semibold uppercase tracking-wider;
+  }
+  .badge-green  { @apply badge bg-fl-green/20 text-fl-green-l border border-fl-green/40; }
+  .badge-blue   { @apply badge bg-fl-blue/20  text-fl-blue-l  border border-fl-blue/40; }
+  .badge-red    { @apply badge bg-fl-danger/20 text-fl-danger  border border-fl-danger/40; }
+  .badge-warn   { @apply badge bg-fl-warn/20  text-fl-warn    border border-fl-warn/40; }
+
+  /* ── Stat Card ───────────────────────────────────────────── */
+  .stat-card {
+    @apply card p-5 flex flex-col gap-1;
+  }
+  .stat-value {
+    @apply font-orbitron text-3xl font-bold text-fl-green-l;
+  }
+  .stat-label {
+    @apply font-rajdhani text-sm uppercase tracking-widest text-fl-mint/60;
+  }
+
+  /* ── Sidebar link ────────────────────────────────────────── */
+  .nav-link {
+    @apply flex items-center gap-3 px-4 py-3 font-rajdhani font-semibold
+           text-sm uppercase tracking-wider text-fl-mint/60
+           transition-all duration-200 border-l-2 border-transparent;
+  }
+  .nav-link:hover  { @apply text-fl-mint bg-fl-green/10 border-fl-green/50; }
+  .nav-link.active { @apply text-fl-green-l bg-fl-green/15 border-fl-green shadow-glow-green; }
+
+  /* ── Table ───────────────────────────────────────────────── */
+  .table-fl { @apply w-full text-sm; }
+  .table-fl thead tr { @apply border-b border-fl-green/20; }
+  .table-fl thead th { @apply px-4 py-3 text-left font-rajdhani font-semibold uppercase tracking-wider text-fl-mint/50 text-xs; }
+  .table-fl tbody tr { @apply border-b border-fl-blue/10 transition-colors duration-150; }
+  .table-fl tbody tr:hover { @apply bg-fl-green/5; }
+  .table-fl tbody td { @apply px-4 py-3 text-fl-mint/80; }
+
+  /* ── Loading spinner ─────────────────────────────────────── */
+  .spinner {
+    @apply inline-block w-5 h-5 border-2 border-fl-green/30 border-t-fl-green-l rounded-full animate-spin;
+  }
+}
+
+/* ─── Micro-animación de borde de circuito ──────────────────── */
+@layer utilities {
+  .circuit-border {
+    position: relative;
+  }
+  .circuit-border::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, #52B788, transparent);
+    background-size: 200% 100%;
+    animation: circuitSweep 2.5s linear infinite;
+    pointer-events: none;
+    opacity: 0.4;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    padding: 1px;
+  }
+
+  @keyframes circuitSweep {
+    0%   { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .text-glow {
+    text-shadow: 0 0 8px rgba(82,183,136,0.6);
+  }
+
+  .scrollbar-fl::-webkit-scrollbar       { width: 4px; }
+  .scrollbar-fl::-webkit-scrollbar-track { background: #040E0A; }
+  .scrollbar-fl::-webkit-scrollbar-thumb { background: #2D6A4F; border-radius: 2px; }
+}
