@@ -15,6 +15,8 @@ const { runMaintenance }     = require('./services/maintenanceService');
 const { authLimiter, sensorLimiter, generalLimiter } = require('./middleware/rateLimiter');
 const { healthCheck }  = require('./controllers/healthController');
 
+const { registerDocs } = require('./config/openapi');
+
 // Rutas
 const authRoutes      = require('./routes/authRoutes');
 const sensorRoutes    = require('./routes/sensorRoutes');
@@ -61,6 +63,9 @@ app.use('/*', async (c, next) => {
 
 // ─── Health check ─────────────────────────────────────────────
 app.get('/health', healthCheck);
+
+// ─── Documentación API (Swagger UI) ──────────────────────────
+registerDocs(app);
 
 // ─── Rate limits específicos ──────────────────────────────────
 app.use('/api/auth/*',       authLimiter);

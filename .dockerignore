@@ -1,0 +1,17 @@
+node_modules
+.env
+.env.local
+.git
+.gitignore
+*.log
+tests
+coverage
+README.md
+ARCHITECTURE.md
+INSTALLATION.md
+SECURITY.md
+docker-compose.yml
+Dockerfile
+vitest.config.js
+test-api.ps1
+test-api.sh
