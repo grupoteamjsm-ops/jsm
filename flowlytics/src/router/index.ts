@@ -28,6 +28,12 @@ const router = createRouter({
           meta: { title: 'Dashboard' }
         },
         {
+          path: 'analytics',
+          name: 'analytics',
+          component: () => import('@/views/analytics/AnalyticsView.vue'),
+          meta: { title: 'Analíticas' }
+        },
+        {
           path: 'zones',
           name: 'zones',
           component: () => import('@/views/zones/ZonesView.vue'),
