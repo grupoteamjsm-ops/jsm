@@ -52,6 +52,13 @@ const router = createRouter({
     {
       path: '/:pathMatch(.*)*',
       redirect: '/dashboard'
+    },
+    // ── Demo (solo desarrollo) ────────────────────────────────
+    {
+      path: '/demo/buttons',
+      name: 'button-demo',
+      component: () => import('@/views/ButtonDemo.vue'),
+      meta: { public: true }
     }
   ]
 })
